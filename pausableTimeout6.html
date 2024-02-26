@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Document</title>
+  </head>
+  <body>
+    <script>
+      const PAUSABLE_TIMEOUT_STATES = {
+        idle: "idle",
+        started: "started",
+        paused: "paused",
+        resumed: "resumed",
+        cleared: "cleared",
+        executed: "executed",
+      };
+
+      const { idle, started, paused, resumed, cleared, executed, restarted } =
+        PAUSABLE_TIMEOUT_STATES;
+
+      class InterruptableTimeout {
+        constructor(callback, delay, isAutoRestarted = false) {
+          this._callback = callback;
+          this._delay = delay;
+          this._isAutoRestarted = isAutoRestarted;
+          this._id = null;
+          this._iterationCount = 0;
+          this._timeStart = null;
+          this._timeLeft = null;
+          // bind context
+          this.execute = this.execute.bind(this);
+          // mange states
+          this._state = idle;
+          // define state stransitions
+          this._stateTransitions = {
+            [started]: [idle, cleared, executed],
+            [paused]: [started, resumed],
+            [resumed]: [paused],
+            [cleared]: [started, paused, resumed],
+            [executed]: [started, resumed],
+          };
+          // log debug info
+          this._isDebugMode = false;
+          this._debugId = null;
+        }
+
+        _goToState(nextState, nextStateCallback) {
+          const allowedPrevStates = this._stateTransitions[nextState];
+          if (allowedPrevStates.includes(this._state)) {
+            this._state = nextState;
+            nextStateCallback();
+          }
+          return this._state;
+        }
+
+        debug(isDebugMode, debugId) {
+          this._isDebugMode = isDebugMode;
+          this._debugId = debugId || Math.random().toString(16).slice(2, 6);
+        }
+
+        _log(...args) {
+          if (!this._isDebugMode) {
+            return;
+          }
+          const progress = `${
+            100 - Math.ceil((this._timeLeft / this._delay) * 100)
+          }%`;
+          console.debug(
+            `[${this.constructor.name}|${this._debugId}|#${this._iterationCount}|${progress}]`,
+            ...args
+          );
+        }
+
+        start() {
+          return this._goToState(started, () => {
+            this._timeStart = Date.now();
+            this._timeLeft = this._delay;
+            this._id = setTimeout(this.execute, this._timeLeft);
+            this._log(started, this, this._timeLeft);
+          });
+        }
+
+        pause() {
+          return this._goToState(paused, () => {
+            clearTimeout(this._id);
+            this._timeLeft -= Date.now() - this._timeStart;
+            this._log(paused, this, this._timeLeft);
+          });
+        }
+
+        resume() {
+          return this._goToState(resumed, () => {
+            this._timeStart = Date.now();
+            this._id = setTimeout(this.execute, this._timeLeft);
+            this._log(resumed, this, this._timeLeft);
+          });
+        }
+
+        clear() {
+          return this._goToState(cleared, () => {
+            clearTimeout(this._id);
+            this._timeLeft -= Date.now() - this._timeStart;
+            this._log(cleared, this, this._timeLeft);
+          });
+        }
+
+        execute() {
+          return this._goToState(executed, () => {
+            clearTimeout(this._id);
+            this._timeLeft -= Date.now() - this._timeStart;
+            this._log(executed, "BEFORE EXECUTION", this, this._timeLeft);
+            this._callback();
+            this._log(executed, "AFTER EXECUTION", this, this._timeLeft);
+            this._iterationCount += 1;
+            if (this._isAutoRestarted) {
+              this.start();
+            }
+          });
+        }
+
+        getState() {
+          return this._state;
+        }
+
+        getTransitions() {
+          this._log(
+            [
+              "NOTE ON TRANSITIONS: \n\n\n[property key] is a next state (i.e. to switch to) and",
+              "[property value] is an array of REQUIRED(!) previous states (i.e. to switch from).",
+              "\n\nIf previous state meets REQUIREMENTS, then the state gets changed and the new state is returned (as a string).",
+              "\n\nOtherwise current state is not changed and the current state gets returned (as a string)\n",
+            ].join(" ")
+          );
+          return this._stateTransitions;
+        }
+      }
+
+      class VisibilityInterruptableTimeout extends InterruptableTimeout {
+        constructor(callback, delay, isAutoRestarted) {
+          super(callback, delay, isAutoRestarted);
+          // bind listener context
+          this._visibilitylistener = this._visibilitylistener.bind(this);
+          // listener addition flag
+          this._isVisibilityListenerAdded = false;
+        }
+
+        start() {
+          const state = super.start();
+          this._addListener(state);
+          return state;
+        }
+
+        clear() {
+          const state = super.clear();
+          this._removeListener(state);
+          return state;
+        }
+
+        excute() {
+          const state = super.excute();
+          this._removeListener(state);
+        }
+
+        _addListener(state) {
+          if ([started].includes(state) && !this._isVisibilityListenerAdded) {
+            document.addEventListener(
+              "visibilitychange",
+              this._visibilitylistener,
+              false
+            );
+            this._isVisibilityListenerAdded = true;
+          }
+        }
+
+        _removeListener(state) {
+          if (
+            [cleared, executed].includes(state) &&
+            this._isVisibilityListenerAdded
+          ) {
+            document.removeEventListener(
+              "visibilitychange",
+              this._visibilitylistener,
+              false
+            );
+            this._isVisibilityListenerAdded = false;
+          }
+        }
+
+        _visibilitylistener() {
+          if (document.visibilityState === "hidden") {
+            this._log("[document is hidden]");
+            this.pause();
+          } else if (document.visibilityState === "visible") {
+            this._log("[document is visible]");
+            this.resume();
+          }
+        }
+      }
+
+      // const callback = () => console.log("!!!CALLBACK!!!");
+      // const delay = 3_000;
+      // let a = new InterruptableTimeout(callback, delay, true);
+      // a.debug(1, "test a");
+      // a.start();
+      // console.log("🚀 ~ a:", a);
+
+      // Example Usage:
+      const a = new VisibilityInterruptableTimeout(
+        () => {
+          console.log("Timeout executed!");
+        },
+        2_000,
+        true
+      );
+      a.debug(1, "test a");
+      a.start();
+    </script>
+  </body>
+</html>

@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Document</title>
+  </head>
+  <body>
+    <script>
+      const PAUSABLE_TIMEOUT_STATES = {
+        idle: 0,
+        started: 1,
+        paused: 2,
+        resumed: 3,
+        cleared: 4,
+        executed: 5,
+      };
+
+      const { idle, started, paused, resumed, cleared, executed } =
+        PAUSABLE_TIMEOUT_STATES;
+
+      class PausableTimeout {
+        constructor(callback, delay) {
+          this.callback = callback;
+          this.delay = delay;
+          this._id = null;
+          this._timeStart = null;
+          this._timeLeft = this.delay;
+          // bind context
+          this.execute = this.execute.bind(this);
+          // mange states
+          this._state = idle;
+          this._stateToNameMap = this._getStateToNameMap();
+          // define state stransitions
+          this._nextToPrevStateMap = {
+            [started]: [idle],
+            [paused]: [started, resumed],
+            [resumed]: [paused],
+            [cleared]: [started, paused, resumed],
+            [executed]: [started, paused, resumed],
+          };
+          this._nextToPrevStateNamesMap = this._getNextToPrevStateNamesMap();
+        }
+
+        _goToState(nextState, nextStateCallback) {
+          const allowedPrevStates = this._nextToPrevStateMap[nextState];
+          if (allowedPrevStates.includes(this._state)) {
+            this._state = nextState;
+            nextStateCallback();
+          }
+          return this._state;
+        }
+
+        start() {
+          return this._goToState(started, () => {
+            this._timeStart = Date.now();
+            this._id = setTimeout(this.execute, this._timeLeft);
+          });
+        }
+
+        pause() {
+          return this._goToState(paused, () => {
+            clearTimeout(this._id);
+            this._timeLeft -= Date.now() - this._timeStart;
+          });
+        }
+
+        resume() {
+          return this._goToState(resumed, () => {
+            this._timeStart = Date.now();
+            this._id = setTimeout(this.execute, this._timeLeft);
+          });
+        }
+
+        clear() {
+          return this._goToState(cleared, () => {
+            clearTimeout(this._id);
+          });
+        }
+
+        execute() {
+          return this._goToState(executed, () => {
+            clearTimeout(this._id);
+            this.callback();
+          });
+        }
+
+        getCurrentState(isHumanReadable = true) {
+          return isHumanReadable
+            ? this._stateToNameMap[this._state]
+            : this._state;
+        }
+
+        getStatesReference(isHumanReadable = true) {
+          return isHumanReadable
+            ? PAUSABLE_TIMEOUT_STATES
+            : this._stateToNameMap;
+        }
+
+        getNextToPrevStateReference(isHumanReadable = true) {
+          return isHumanReadable
+            ? this._nextToPrevStateNamesMap
+            : this._nextToPrevStateMap;
+        }
+
+        _getStateToNameMap() {
+          const isHumanReadable = true;
+          return Object.entries(
+            this.getStatesReference(isHumanReadable)
+          ).reduce((acc, [name, state]) => {
+            acc[state] = name;
+            return acc;
+          }, {});
+        }
+
+        _getNextToPrevStateNamesMap() {
+          return Object.entries(this._nextToPrevStateMap).reduce(
+            (acc, [nextState, prevStates]) => {
+              acc[this._stateToNameMap[nextState]] = prevStates.map(
+                (state) => this._stateToNameMap[state]
+              );
+              return acc;
+            },
+            {}
+          );
+        }
+      }
+
+      // class VisibilityPausableTimeout extends PausableTimeout {
+      //   constructor(callback, delay) {
+      //     super(callback, delay);
+      //     // bind listener context
+      //     this._visibilitylistener = this._visibilitylistener.bind(this);
+      //     // listener addition flag
+      //     this._isVisibilityListenerAdded = false;
+      //   }
+
+      //   start() {
+      //     const state = super.start();
+      //     this._addListener(state);
+      //     return state;
+      //   }
+
+      //   clear() {
+      //     const state = super.clear();
+      //     this._removeListener(state);
+      //     return state;
+      //   }
+
+      //   excute() {
+      //     const state = super.excute();
+      //     this._removeListener(state);
+      //   }
+
+      //   _addListener(state) {
+      //     if ([started].includes(state) && !this._isVisibilityListenerAdded) {
+      //       document.addEventListener(
+      //         "visibilitychange",
+      //         this._visibilitylistener,
+      //         false
+      //       );
+      //       this._isVisibilityListenerAdded = true;
+      //     }
+      //   }
+
+      //   _removeListener(state) {
+      //     if (
+      //       [cleared, executed].includes(state) &&
+      //       this._isVisibilityListenerAdded
+      //     ) {
+      //       document.removeEventListener(
+      //         "visibilitychange",
+      //         this._visibilitylistener,
+      //         false
+      //       );
+      //       this._isVisibilityListenerAdded = false;
+      //     }
+      //   }
+
+      //   _visibilitylistener() {
+      //     if (document.visibilityState === "hidden") {
+      //       this.pause();
+      //     } else if (document.visibilityState === "visible") {
+      //       this.resume();
+      //     }
+      //   }
+      // }
+
+      const callback = () => console.log("!!!CALLBACK!!!");
+      const delay = 60_000;
+      let a = new PausableTimeout(callback, delay);
+      a.start();
+      console.log("🚀 ~ a:", a);
+
+      // // Example Usage:
+      // const a = new VisibilityPausableTimeout(() => {
+      //   console.log("Timeout executed!");
+      // }, 80_000);
+
+      // console.log("🚀 ~ a ~ a:", a);
+      // a.start();
+    </script>
+  </body>
+</html>

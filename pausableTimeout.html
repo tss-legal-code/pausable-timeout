@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Document</title>
+  </head>
+  <body>
+    <script>
+      class PausableTimeout {
+        constructor(callback, delay) {
+          this._id = null;
+          this._timeStart = null;
+          this._timeLeft = delay;
+          this._states = {
+            0: "idle",
+            1: "started",
+            2: "paused",
+            3: "cleared",
+            4: "executed",
+          };
+          this._state = 0;
+          // bind context
+          this._finish = this._finish.bind(this);
+          // add gettters
+          this.getCallback = () => callback;
+          this.getDelay = () => delay;
+        }
+
+        _stateMachine(allowedPrevStates, nextState, nextStateCallback) {
+          if (allowedPrevStates.includes(this._state)) {
+            this._state = nextState;
+            nextStateCallback();
+          }
+          return this._state;
+        }
+
+        _finish() {
+          return this._stateMachine([1], 4, () => {
+            clearTimeout(this._id);
+            const callback = this.getCallback();
+            callback();
+          });
+        }
+
+        start() {
+          return this._stateMachine([0, 2], 1, () => {
+            console.log("_timeoutLeft:", this._timeLeft);
+            this._timeStart = Date.now();
+            this._id = setTimeout(this._finish, this._timeLeft);
+          });
+        }
+
+        pause() {
+          return this._stateMachine([1], 2, () => {
+            clearTimeout(this._id);
+            this._timeLeft -= Date.now() - this._timeStart;
+            console.log("_timeoutLeft:", this._timeLeft);
+          });
+        }
+
+        clear() {
+          return this._stateMachine([1, 2], 3, () => {
+            clearTimeout(this._id);
+          });
+        }
+
+        getState(isNumeric = true) {
+          return this._state;
+        }
+
+        getStateName() {
+          return this._states[this._state];
+        }
+      }
+
+      class VisibilityPausableTimeout extends PausableTimeout {
+        constructor(callback, delay) {
+          super(callback, delay);
+          // bind listener context
+          this._visibilitylistener = this._visibilitylistener.bind(this);
+          // listener addition flag
+          this._isVisibilityListenerAdded = false;
+        }
+
+        _visibilitylistener() {
+          if (document.visibilityState === "hidden") {
+            this.pause();
+          } else if (document.visibilityState === "visible") {
+            this.start();
+          }
+        }
+
+        _addListener(state) {
+          if ([1].includes(state) && !this._isVisibilityListenerAdded) {
+            document.addEventListener(
+              "visibilitychange",
+              this._visibilitylistener,
+              false
+            );
+            this._isVisibilityListenerAdded = true;
+            console.log(
+              "🚀 ~ VisibilityPausableTimeout ~ _addListener ~ this._isVisibilityListenerAdded:",
+              this._isVisibilityListenerAdded
+            );
+          }
+        }
+
+        _removeListener(state) {
+          if ([3, 4].includes(state) && this._isVisibilityListenerAdded) {
+            document.removeEventListener(
+              "visibilitychange",
+              this._visibilitylistener,
+              false
+            );
+            this._isVisibilityListenerAdded = false;
+            console.log(
+              "🚀 ~ VisibilityPausableTimeout ~ _removeListener ~ this._isVisibilityListenerAdded:",
+              this._isVisibilityListenerAdded
+            );
+          }
+        }
+
+        start() {
+          const state = super.start();
+          this._addListener(state);
+          return state;
+        }
+
+        clear() {
+          const state = super.clear();
+          this._removeListener(state);
+          return state;
+        }
+
+        _finish() {
+          const state = super._finish();
+          this._removeListener(state);
+        }
+      }
+
+      // const callback = () => console.log("!!!CALLBACK!!!");
+      // const delay = 60_000;
+      // let a = new PausableTimeout(callback, delay);
+      // a.start();
+      // console.log("🚀 ~ a:", a);
+
+      // document.addEventListener("visibilitychange", console.log)
+
+      // Example Usage:
+      // const a = new VisibilityPausableTimeout(() => {
+      //   console.log("Timeout executed!");
+      // }, 10_000);
+
+      // console.log("🚀 ~ a ~ a:", a);
+      // a.start();
+    </script>
+  </body>
+</html>
